@@ -9,9 +9,12 @@ import (
 	"sync"
 
 	vault "github.com/hashicorp/vault/api"
+	profile "github.com/pkg/profile"
+	progressbar "github.com/schollz/progressbar/v3"
 )
 
 func main() {
+	defer profile.Start(profile.ProfilePath(".")).Stop()
 	vaultConfig := vault.DefaultConfig()
 	vaultConfig.Address = getAddressFromEnv()
 	vaultClient, err := vault.NewClient(vaultConfig)
@@ -40,14 +43,25 @@ func main() {
 		close(groupDescriptions)
 	}()
 
+	fmt.Println("Collecting entities and groups...")
+	// Progress Bar
+	progressMax := len(entityIdList) + len(groupDescriptions)
+	progressChannel := make(chan bool, progressMax)
+	go func() {
+		bar := progressbar.Default(int64(progressMax))
+		for range progressChannel {
+			bar.Add(1)
+		}
+	}()
+
 	fileWriterWaitGroup := sync.WaitGroup{}
 	fileWriterWaitGroup.Add(2)
-	go writeJsonChannelToFile(entityDescriptions, "entities.json", &fileWriterWaitGroup)
-	go writeJsonChannelToFile(groupDescriptions, "groups.json", &fileWriterWaitGroup)
+	go writeJsonChannelToFile(entityDescriptions, "entities.json", &fileWriterWaitGroup, progressChannel)
+	go writeJsonChannelToFile(groupDescriptions, "groups.json", &fileWriterWaitGroup, progressChannel)
 	fileWriterWaitGroup.Wait()
 }
 
-func writeJsonChannelToFile(channel chan []byte, fileName string, wg *sync.WaitGroup) {
+func writeJsonChannelToFile(channel chan []byte, fileName string, wg *sync.WaitGroup, progressChannel chan bool) {
 	defer wg.Done()
 	strBuilder := strings.Builder{}
 	strBuilder.WriteString("{ \"list\": [\n")
@@ -56,8 +70,9 @@ func writeJsonChannelToFile(channel chan []byte, fileName string, wg *sync.WaitG
 			strBuilder.WriteByte(nyble)
 		}
 		strBuilder.WriteString(",")
+		progressChannel <- true
 	}
-
+	fmt.Printf("Writing data to %v\n", fileName)
 	str := strBuilder.String()
 	str = str[:len(str)-1]
 	os.WriteFile(fileName, []byte(str+"\n]}"), 0644)

@@ -5,6 +5,10 @@
 *.so
 *.dylib
 
+*.json
+*.txt
+*.pprof
+
 # Test binary, built with `go test -c`
 *.test
 
